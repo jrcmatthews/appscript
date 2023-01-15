@@ -1,0 +1,420 @@
+class SheetDataRow {
+  constructor(rowId, headers, sheet) {
+    this.offSet = 4;
+    this.rowId = parseInt(rowId);
+    if (headers == undefined || !isArray(headers))  {
+      headers = getHeaderRow();
+    }
+    this.sheet = sheet || SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+    this.range = getRowA1Notation(rowId);
+    let rowVals = getRowValues(rowId);
+    let formulas = getRowFormulas(rowId);
+    let dataValidations = getRowDataValidations(rowId);
+    let numberFormats = getRowNumberFormats(rowId);
+    for (let idx in headers)  {
+      idx = parseInt(idx);
+      this[headers[idx]] = {col: idx + 1, value: rowVals[idx], formula: formulas[idx], dataValidation: dataValidations[idx], numberFormat: numberFormats[idx]};
+    }
+  }
+
+  // Add new row to sheet
+  create()  {
+    if (!this.exist())  return null;
+    this.sheet.appendRow(this.build()[0]);
+    let newObj = new SheetDataRow(this.sheet.getLastRow());
+    return newObj;
+  }
+
+  exist() {
+    return (this.hasOwnProperty("rowId") && this.rowId  != undefined && this.rowId != null && this.sheet.hasOwnProperty("getSheetId"));
+  }
+
+  // Read existing row values & formulas to this
+  read()  {
+    if(!this.exist()) return null;
+    if(this.headers == undefined || !isArray(this.headers)) this.headers = getHeaderRow();
+    if(this.range == null) this.range = getRowA1Notation();
+    let rowVals = getRowValues(this.rowId);
+    let formulas = getRowFormulas(this.rowId);
+    let dataValidations = getRowDataValidations(rowId);
+    let numberFormats = getRowNumberFormats(rowId);
+    for (let idx in this.headers) {
+      idx = parseInt(idx);
+      this[this.headers[idx]] = {col: idx + 1, value: rowVals[idx], formula: formulas[idx], dataValidation: dataValidations[idx], numberFormat: numberFormats[idx]};
+    }
+  return this;
+  }
+
+  // Update sheet using row values & formulas in this
+  update()  {
+    let sheetRange = this.sheet.getRange(this.range);
+    let rowVals = this.build()[0];
+    if (!isEmptyArray(rowVals)) {
+      sheetRange.setValues([rowVals]);
+      SpreadsheetApp.flush();
+    }
+    return this;
+  }
+
+  build() {
+    let rowVals = [[],[]];
+    let myKeys = Object.keys(this);
+    for (let key of myKeys) {
+      if (!this[key].hasOwnProperty("col"))  continue;
+        if (this[key].formula != "")  this[key].value = this[key].formula
+        rowVals[0].push(this[key].value);
+        rowVals[1].push(this[key].numberFormat);
+    }
+  return rowVals;
+  }
+
+  // Delete this row from sheet
+  remove()  {
+    this.sheet.deleteRow(this.rowId);
+    return this;
+  }
+
+  // Clear value & formula of the property
+  clear(prop) {
+    if (prop != undefined) {
+      this.setValue(prop);
+      this.setFormula(prop);
+    } else {
+      var myKeys = Object.keys(this);
+      for (let idx = this.offSet; idx < myKeys.length; idx++)  {
+        this.clear(myKeys[idx]);
+      }
+    }
+    return this;
+  }
+
+  // Get the value of the property
+  getValue(prop = isRequired())  {
+    return (this.hasOwnProperty(prop)) ? this[prop].value : undefined;
+  }
+
+  // Get all values of the object
+  getValues() {
+    let myKeys = Object.keys(this);
+    let vals = [];
+    for (let idx = this.offSet; idx <= myKeys.length; idx++)  {
+      vals.push(this[myKeys[idx]].value);
+    }
+    return vals;
+  }
+
+  // Get the formula of the property
+  getFormula(prop = isRequired())  {
+    return (this.hasOwnProperty(prop)) ? this[prop].formula : undefined;
+  }
+
+  // Get all formulas of the object
+  getFormulas() {
+    let myKeys = Object.keys(this);
+    let vals = [];
+    for (let idx = this.offSet; idx <= myKeys.length; idx++)  {
+      vals.push(this[myKeys[idx]].formula);
+    }
+    return vals;
+  }
+
+  // Get the value of the property
+  getDataValidation(prop = isRequired())  {
+    return (this.hasOwnProperty(prop)) ? this[prop].dataValidation : undefined;
+  }
+
+  // Get all values of the object
+  getDataValidations() {
+    let myKeys = Object.keys(this);
+    let vals = [];
+    for (let idx = this.offSet; idx <= myKeys.length; idx++)  {
+      vals.push(this[myKeys[idx]].dataValidations);
+    }
+    return vals;
+  }
+
+  // Set the value of the property
+  setValue(prop = isRequired(), val)  {
+    if (this.hasOwnProperty(prop)) {
+      this[prop].value = val || "";
+    }
+    return this;
+  }
+
+  // Set all values of the object
+  setValues(props = isRequired(), vals = isRequired()) {
+    if(isArray(props) && isArray(vals))  {
+      for (let idx in props)  {
+        this[props[idx]].value = vals[idx]; 
+      }
+    }
+    return this;
+  }
+
+  // Set the formula of the property
+  setFormula(prop = isRequired(), val)  {
+    if (this.hasOwnProperty(prop)) {
+      this[prop].formula = val || "";
+    }
+    return this;
+  }
+
+  // Set all formulas of the object
+  setFormulas(props = isRequired(), vals = isRequired()) {
+    if(isArray(props) && isArray(vals))  {
+      for (let idx in props)  {
+        this[props[idx]].formula = vals[idx]; 
+      }
+    }
+    return this;
+  }
+
+  // Set the data validation of the property
+  setDataValidation(prop = isRequired(), rule)  {
+    if (this.hasOwnProperty(prop)) {
+      this[prop].value = rule || null;
+    }
+    return this;
+  }
+
+  // Set all data Validations of the object
+  setDataValidations(props = isRequired(), rules = isRequired()) {
+    if(isArray(props) && isArray(rules))  {
+      for (let idx in props)  {
+        this[props[idx]].dataValidation = rules[idx]; 
+      }
+    }
+    return this;
+  }
+
+  hilite()  {
+    let range = this.sheet.getRange(this.range);
+    if (range.getBackground() == "#fff2cc") {
+      range.setBackground('#ffffff');
+    } else {
+      range.setBackground('#fff2cc');
+    }
+    SpreadsheetApp.flush();
+    return this;
+  }
+
+
+
+}
+  //
+// Sheet Utility Functions
+  //
+
+// Call the API to clear the basic filter for selected sheet
+function clearBasicFilter(ssId = isRequired(),sheetId = isRequired()) {
+  let requests = [{"clearBasicFilter": {"sheetId": sheetId}}];
+  let resp = Sheets.Spreadsheets.batchUpdate({'requests': [{"clearBasicFilter": {"sheetId": sheetId}}]}, ssId);
+}
+
+function getRowValues(rowId = isRequired(), sheet, colCount, startCol)  {
+  sheet = sheet || SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  colCount = colCount || sheet.getLastColumn();
+  startCol = startCol || 1;
+  return sheet.getRange(rowId,startCol,rowId, colCount).getValues()[0];
+}
+
+function getRowFormulas(rowId = isRequired(), sheet, colCount, startCol)  {
+  sheet = sheet || SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  colCount = colCount || sheet.getLastColumn();
+  startCol = startCol || 1;
+  return sheet.getRange(rowId,startCol,1, colCount).getFormulas()[0];
+}
+
+function getRowDataValidations(rowId = isRequired(), sheet, colCount, startCol) {
+  sheet = sheet || SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  colCount = colCount || sheet.getLastColumn();
+  startCol = startCol || 1;
+  return sheet.getRange(rowId,startCol,1, colCount).getDataValidations()[0];
+}
+
+function getRowNumberFormats(rowId = isRequired(), sheet, colCount, startCol) {
+  sheet = sheet || SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  colCount = colCount || sheet.getLastColumn();
+  startCol = startCol || 1;
+  return sheet.getRange(rowId,startCol,1, colCount).getNumberFormats()[0];
+}
+
+function getRowA1Notation(rowId = isRequired, sheet, colCount, startCol)  {
+  sheet = sheet || SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  colCount = colCount || sheet.getLastColumn();
+  startCol = startCol || 1;
+  return sheet.getRange(rowId,startCol,1, colCount).getA1Notation();
+}
+
+function setRowDataValidations(rowId = isRequired(), rules = isRequired(), sheet) {
+  sheet = sheet || SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  let aRange = sheet.getRange(rowId,1,rowId,sheet.getLastColumn());
+  aRange.setDataValidations(rules);
+  SpreadsheetApp.flush();
+}
+
+function setRowNumberFormats(rowId = isRequired(), formats = isRequired(), sheet) {
+  sheet = sheet || SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  let aRange = sheet.getRange(rowId,1,rowId,sheet.getLastColumn());
+  aRange.setNumberFormats(formats);
+  SpreadsheetApp.flush();
+}
+
+function setRowValues(rowId = isRequired(), values = isRequired(), sheet) {
+  sheet = sheet || SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  let aRange = sheet.getRange(rowId,1,rowId,sheet.getLastColumn());
+  aRange.setValues(values);
+  SpreadsheetApp.flush();
+}
+
+function getHeaderRow(sheet, rowId, colCount, startCol)  {
+  sheet = sheet || SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  rowId = rowId || 1;
+  colCount = colCount || sheet.getLastColumn();
+  startCol = startCol || 1;
+  return sheet.getRange(rowId,startCol,1,colCount).getValues()[0];
+}
+
+/** 
+ * Locate which column contains the header, and return column number
+ * 
+ * @param {string} header: name of the header to locate in the active sheet
+ * @param {object} optional: the sheet object to use
+ * @return {number} the column number
+*/
+function findHeaderColumn(header = isRequired(), sheet, startCol) {
+  sheet = sheet || SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  startCol = startCol || 1;
+  let headerRow = sheet.getRange(column2Letter(startCol)+"1:BZ1").getValues()[0];
+  let col1 = headerRow.findIndex((elem) => {return elem == header});
+  if (col1 == -1) die("Header column '"+header+"' not found in sheet '"+sheet.getSheetName(),"Column Not Found");
+  if (col1 > -1) col1++
+  return col1 + (startCol - 1);
+}
+
+/** 
+ * Read the display value from a specific cell
+ * 
+ * @param {number} row: the number of the row to read from
+ * @param {number} col: the sheet column to read from
+ * @param {object} optional: the sheet object to use
+ * @return {object} the cell Range, useful for chaining
+*/
+function getCellDisplay(row = isRequired(), col = isRequired(), sheet)  {
+  sheet = sheet || SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  return sheet.getRange(row, col).getDisplayValue();
+}
+
+/** 
+ * Set the display value in a specific cell
+ * 
+ * @param {number} row: the number of the row to write to
+ * @param {number} col: the sheet column to write to
+ * @param {object} optional: the sheet object to use
+ * @return {object} the cell Range, useful for chaining
+*/
+function setCellDisplay(row = isRequired(), col = isRequired(), value = "", sheet)  {
+  sheet = sheet || SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  return sheet.getRange(row, col).setValue(value);
+}
+
+
+/** 
+ * Return the display values of an entire column.
+ * 
+ * @param {string} header: name of the header to locate in the active sheet
+ * @param {object} optional: the sheet object
+ * @return {Array} the display values of the column (w/o header)
+*/
+function getColumnValues(header = isRequired(), sheet)  {
+    sheet = sheet || SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+    return sheet.getRange(2, findHeaderColumn("Full Name"), sheet.getLastRow()-1, 1).getDisplayValues().map((elem) => {return elem[0]});
+  }
+
+function findInColumn(col = isRequired(), val = isRequired(), startRow, endRow) {
+  let sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  startRow = startRow || 1;
+  endRow = endRow || sheet.getLastRow();
+  let values = sheet.getRange(col + startRow + ":" + col + endRow).getValues();
+  return (values.findIndex((elem) => {return elem == val}) + startRow);
+}
+
+function sheetFindInColumn(sheet = isRequired(), col = isRequired(), val = isRequired(), startRow, endRow) {
+  startRow = startRow || 1;
+  endRow = endRow || sheet.getLastRow();
+  let values = sheet.getRange(col + startRow + ":" + col + endRow).getValues();
+  return values.findIndex((elem) => {return elem == val}) + startRow;
+}
+
+/**
+ * Locate a value in a row, optionally identify start and end columns
+ * 
+ * @param {number} row - required - the row to be searched
+ * @param {string} val - required - the value to be searched for
+ * @param {number} startCol - optional - the column for starting the search
+ * @param {number} endCol - optional - the column for ending the search
+ * @return {string} A1 - the A1 notation of the cell where val is located (00 = not found)
+ */
+function findInRow(row = isRequired(), val = isRequired(), startCol, endCol)  {
+  let sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  startCol = startCol || 1;
+  endCol = endCol || sheet.getLastColumn();
+  let values = sheet.getRange(row,startCol,1,endCol - startCol).getValues()[0];
+  let col = values.findIndex((elem) => {return elem == val});
+  if (col == -1) return ("00");
+  return (sheet.getRange(row,col + startCol).getA1Notation());
+}
+
+function getFilteredRowIds()  {
+  let ss = SpreadsheetApp.getActiveSpreadsheet();
+  let ssId = ss.getId();
+  let sheet = ss.getActiveSheet();
+  let sheetId = sheet.getSheetId();
+  let rowIds = [];
+  let fields = "sheets(data(rowMetadata(hiddenByFilter)),properties/sheetId)";
+  let sheets = Sheets.Spreadsheets.get(ssId, { fields: fields }).sheetId;
+  for (let i in sheets)  {
+    if (sheets[i].properties.sheetId == sheetId)  {
+      let data = sheets[i].data;
+      let rowMetadata = data[0].rowMetadata;
+      for (let rowId = 0; rowId < rowMetadata.length; rowId++) {        
+        if (rowMetadata[rowId].hiddenByFilter) rowIds.push(rowId+1);
+      }
+    }
+  }
+  return rowIds;
+}
+
+/**
+ * Convert a column number to a Sheet column letter
+ * 
+ * @params {number} column - required - the column number to convert
+ * @return {string} A-ZZ - the column letter (unlimited)
+ */
+// Source: Stackoverflow
+function column2Letter(column = isRequired()) {
+  var temp, letter = '';
+  while (column > 0) {
+    temp = (column - 1) % 26;
+    letter = String.fromCharCode(temp + 65) + letter;
+    column = (column - temp - 1) / 26;
+  }
+  return letter;
+}
+
+
+// dateValue("10/12/2021")+timeValue("3:00 PM") for inserting into a cell or formula
+function jsDate2Sheets(serialNum = isRequired())  {
+  let dateParts = Utilities.formatDate(serialNum,"America/New_York","MM/dd/yyyy|h:mm a").split("|");
+  return 'dateValue("' + dateParts[0] + '")+timeValue("' + dateParts[1] + '")';
+}
+
+// Shows an alert and then throw the final error if fatal
+function die(msg, err)  {
+  msg = msg || "HAL detected an unrecoverable fault and died!";
+  SpreadsheetApp.getUi().alert(msg);
+  if (err || msg.includes("died")) {
+    console.log(msg + "\n" + err);
+    throw new Error(err || msg);
+  }
+}
