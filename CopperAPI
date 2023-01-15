@@ -1,0 +1,1094 @@
+/* 
+  Appscript for Copper v2.20.5
+*/
+
+  /**
+   * @class Copper v2.20.5
+   * - Copper API with a very loose wrapper (not very abstract)
+   * - Used Objects/Methods are defined, others pending
+   */
+class Copper {
+  constructor() {
+    this.api_url = "https://api.copper.com/developer_api/v1";
+    this.api_token = "0fc42a25b5537088fb24fe5799e29cb5";
+    this.api_email = "jason@houwzer.com";
+    this.def_page_size = 200;
+    this.def_page_num = 1;
+    this.api_requests_remaining = 180;
+    this.api_execution_time = MAX_EXECUTION_TIME;
+    this.api_timestamp = Date.now();
+    this.throttle = true;
+    this.api_header = {
+      'X-PW-AccessToken': this.api_token,
+      'X-PW-Application': 'developer_api',
+      'X-PW-UserEmail': this.api_email,
+      'Content-Type': 'application/json'
+    };
+    // These hold arrays of data from Copper that seldom change
+    //   they are loaded on the first call to any API where it is needed
+    //   afterwards, this script uses the static array for the lookups.
+    //   To force a refresh, set the property to empty array
+    this.activity_types = [];
+    this.customFieldDefinitions = [];
+    this.customActivityTypes = [];
+    this.customContactTypes = [];
+    this.pipelines = []; 
+  }
+
+/**
+ * @method_ Private
+ * - Throttle calls to ensure we remain within limits (not yet implemented)
+ */
+  trottle_(func, duration = ONE_MINUTE)  {
+    sleep(duration);
+    return func;
+  }
+
+/**
+ * @method_ Private
+ * - Return the API Header
+ */
+  getAPIHeader_()  {
+    return this.api_header;
+  }
+
+/**
+ * @method_ Private
+ * - Using a CopperSearch, count the number of leads that match,
+ * - if no search is requested, return total count of all leads.
+ */
+  getLeadCount_(aSearch = new CopperSearch())  {
+    this.leadCount = new CopperFetcher('post','/leads/search',aSearch).exec().getAllHeaders()["x-pw-total"];
+    return this.leadCount;
+  }
+
+/**
+ * @method_ Private
+ * - Initialize class properties to a known state
+ */
+  initClass_(obj, properties) {
+    for (var x in properties) {
+      obj[x] = properties[x];
+    }
+  }
+
+/* AppScript API to Copper - effective but ugly.  If it's not in here, I don't need it yet!
+   Uses a CopperFetcher object to call the Copper API and then uses a CopperResponder object to hold the response.  
+   Searching is accomplished with a CopperSearch object.
+*/
+
+  //
+// API: Accounts and Users
+  // 
+
+/** @method fetchUserByID
+ * - Provided a valid Copper ID, return the User in a Responder
+ * @params {string|number} id - the Copper UserID to fetch
+ * @return {Object} CopperResponder(User, CopperFetcher)
+ * - returns null if no user is found by Copper
+ */
+  // Fetch User by ID
+  fetchUserByID(id = isRequired()) {
+    let myfetch = new CopperFetcher('get','/users/' + id).exec();
+    return new CopperResponder((myfetch.getResponseCode() == 200) ? 
+      new User(JSON.parse(myfetch.response)) : null, myfetch);
+  }
+
+  /** @method listUsers
+   * - provides an array of Users from Copper
+   * @params {number} max_items - the maximum number of Users to return
+   * @return {Object} CopperResponder(Array of Users, CopperFetcher)
+   */
+  listUsers(max_items = 200) {
+    let myfetch = new CopperFetcher('post','/users/search',
+      {"page_size": Math.min(this.def_page_size,max_items), "page_number": 1}).exec();
+    let userList = [];
+    while (myfetch.status == 200 && userList.length < max_items && userList.length < myfetch.x_pw_total) {
+      let data = JSON.parse(myfetch.response);
+      userList.push(...new User(data));
+      myfetch.next();
+    }
+    return new CopperResponder(userList, myfetch);
+  }
+
+    //
+  // API: Leads
+    //
+
+  /** @method fetchLeadByID
+   * - provided a Copper ID, return the Lead associated with it
+   * @params {string|number} id - valid LeadID
+   * @returns {Object} CopperResponder(Lead, CopperFetcher)
+   * - returns null if invalid id or not found 
+   */
+  fetchLeadByID(id = isRequired()) {
+    let myfetch = new CopperFetcher('get','/leads/' + id).exec();
+    return new CopperResponder((myfetch.getResponseCode() == 200) ? 
+      new Lead(JSON.parse(myfetch.response)) : null, myfetch);
+  }
+
+/** @method countLeadsByCriteria
+ * - determines the number of Lead available using the search parameters
+ * @params {Object} CopperSearch - contains the search parameters for the count
+ * @returns {Object} CopperResponder({number}, CopperFetcher)
+ * - returns null if no Leads match the search criteria 
+ */
+  countLeadsByCriteria(aSearch = new CopperSearch())  {
+    let myfetch = new CopperFetcher('post','/leads/search',aSearch.get()).exec();
+    return new CopperResponder((myfetch.getResponseCode() == 200) ? parseInt(myfetch.getAllHeaders()["x-pw-total"]) : null, myfetch);
+  }
+
+/** @method isValidLead
+ * - determines if a specific LeadID is valid
+ * @params {string|number} id - LeadID to verify
+ * @returns {boolean} 
+ * - returns null if no Leads match the search criteria 
+ */
+  isValidLead(id = isRequired()) {
+    return (new CopperFetcher('get','/leads/' + id).exec().status == 200) ? true : false;
+  }
+
+/** @method fetchLeadByEmail
+ * - returns all leads with the specificed email address
+ * @params {string} email - Email address to search for in Copper
+ * @returns {array} - the complete array of Leads matching the email address (0 or more) 
+ */
+  fetchLeadByEmail(email = isRequired()) {
+    if (!isEmail(email)) return null;
+    let aSearch = new CopperSearch({"emails": email});
+    return $.listLeads(aSearch);
+  }
+
+  // List Leads (Search)
+    // params: [optional] CopperSearch leads to find, [optional] Number of items to return
+    // returns: Responder(Array of User objects, fetcher used) 
+  listLeads(aSearch = new CopperSearch({"sort_by": "name"}), max_items = 200) {
+    aSearch.update({"page_size": Math.min(this.def_page_size,max_items)});
+    let myfetch = new CopperFetcher('post','/leads/search',aSearch.get()).exec();
+    let leadList = [];
+    while (myfetch.status == 200 && leadList.length < max_items && leadList.length < myfetch.x_pw_total) {
+      let data = JSON.parse(myfetch.response);
+      leadList.push(...new Lead(data));
+      myfetch.next();
+    }
+    return new CopperResponder(leadList, myfetch);
+  }
+
+  // List Lead's Activities
+    // params: [required] Lead|lead id number, [optional] CopperSearch activities to find
+    // returns: Responder(Array of Activity objects, fetcher used)
+  leadActivities(aLead = isRequired(), theSearch = new CopperSearch()) {
+    let leadID = (aLead instanceof Lead) ? aLead["id"] : parseInt(aLead);
+    let myfetch = new CopperFetcher('post','/leads/' + leadID + '/activities',theSearch.get()).exec();
+    return new CopperResponder((myfetch.getResponseCode() == 200) ? new ActivityLog(JSON.parse(myfetch.response)) : null, myfetch); 
+  }
+
+  // List Customer Sources
+    // params: none
+    // returns: Responder(Array of simple {id : value} objects, fetcher used)
+  listCustomerSources() {
+    let myfetch = new CopperFetcher('get','/customer_sources').exec();
+    return new CopperResponder((myfetch.getResponseCode() == 200) ? JSON.parse(myfetch.response) : null, myfetch);
+  }
+
+  // List Lead Statuses
+    // params: none
+    // returns: Responder(Array of simple {id : value} objects, fetcher used)
+  listLeadStatuses() {
+    let myfetch = new CopperFetcher('get','/lead_statuses').exec();
+    return new CopperResponder((myfetch.getResponseCode() == 200) ? JSON.parse(myfetch.response) : null, myfetch);
+  }
+
+  // Update Lead Tags "PUT"
+    // params: Lead
+    // returns: Responder(Lead, fetcher used)
+  updateLeadTags(aLead = isRequired())  {
+    let myfetch = new CopperFetcher('put','/leads/' + aLead["id"], {"tags": aLead.getTags()}).exec();
+    return new CopperResponder((myfetch.getResponseCode() == 200) ? JSON.parse(myfetch.response): null, myfetch);
+  }
+
+    //
+  // API: People
+    //
+
+  // Fetch Person by ID
+    // returns: Responder(Person object, fetcher used)
+  fetchPersonByID(id = isRequired()) {
+    let myfetch = new CopperFetcher('get','/people/' + id).exec();
+    return new CopperResponder((myfetch.getResponseCode() == 200) ? 
+      new Person(JSON.parse(myfetch.response)) : null, myfetch);
+  }
+
+  // Fetch a Person by Email
+    // returns: Responder(Person object, fetcher used)
+  fetchPersonByEmail(email = isRequired()) {
+    if (!isEmail(email)) return null;
+    let aSearch = new CopperSearch({"email": email});
+    let myfetch = new CopperFetcher('post','/people/fetch_by_email', aSearch.get()).exec();
+    return new CopperResponder((myfetch.getResponseCode() == 200) ? new Person(JSON.parse(myfetch.response)) : null, myfetch);
+  }
+
+  // Determine if a Person exists
+  personExists(email = isRequired())  {
+    if(!isEmail(email)) return null;
+    let person = $.fetchPersonByEmail(email).getResponse();
+    return (person == null) ? false: true;
+  }
+
+  // Update Person Tags "PUT"
+    // params: Person
+    // returns: Responder(Person, fetcher used)
+  updatePersonTags(aPerson = isRequired())  {
+    let myfetch = new CopperFetcher('put','/people/' + aPerson["id"], {"tags": aPerson.getTags()}).exec();
+    return new CopperResponder((myfetch.getResponseCode() == 200) ? JSON.parse(myfetch.response): null, myfetch);
+  }
+
+  // List People by search criteria
+    // params: [optional] search criteria, [optional] max items to return
+    // returns: Responder(Array of Person objects, fetcher used)
+  listPeople(aSearch = new CopperSearch({"sort_by": "name"}), max_items = 20) {
+    aSearch.update({"page_size": Math.min(this.def_page_size,max_items), "page_number": 1});
+    let myfetch = new CopperFetcher('post','/people/search',aSearch.get()).exec();
+    let pplList = [];
+    while (myfetch.status == 200 && pplList.length < max_items && pplList.length < myfetch.x_pw_total) {
+      let data = JSON.parse(myfetch.response);
+      pplList.push(...new Person(data));
+      myfetch.next();
+    }
+    return new CopperResponder(pplList, myfetch);
+  }
+
+  // See Person's Activities
+  listPersonActivities(activity_types = isRequired()) {}
+
+  // List Contact Types
+    // params: none
+    // returns: Responder(Array of simple {id : value} objects, fetcher used)
+  listContactTypes() {
+    if (!isEmptyArray(this.customContactTypes)) return new CopperResponder(this.customContactTypes, null);
+    let myfetch = new CopperFetcher('get','/contact_types').exec();
+    let response = JSON.parse(myfetch.response);
+    this.customContactTypes.push(...response);
+    return new CopperResponder((myfetch.getResponseCode() == 200) ? this.customContactTypes : null, myfetch);
+  }
+    //
+  // API: Companies
+    // Not used by Houwzer
+
+    //
+  // API: Opportunities
+    //
+
+  // Fetch Opportunity by ID
+    // params: Opportunity|ID
+    // returns: Responder(Opportunity object, fetcher used)
+  fetchOpportunityByID(id = isRequired()) {
+    let myfetch = new CopperFetcher('get','/opportunities/' + id).exec();
+    return new CopperResponder((myfetch.getResponseCode() == 200) ? 
+      JSON.parse(myfetch.response) : null, myfetch);
+  }
+
+  // Count Opportunities by Criteria
+  countOpportunitiesByCriteria(aSearch = new CopperSearch())  {
+    let myfetch = new CopperFetcher('post','/opportunities/search',aSearch.get()).exec();
+    return new CopperResponder(myfetch.getAllHeaders()["x-pw-total"], myfetch);
+  }
+
+  // List Opportunities
+  listOpportunities(aSearch = new CopperSearch({"sort_by": "name"}), max_items = 20) {
+    aSearch.update({"page_size": Math.min(this.def_page_size,max_items), "page_number": 1});
+    let myfetch = new CopperFetcher('post','/opportunities/search',aSearch.get()).exec();
+    let oppList = [];
+    while (myfetch.status == 200 && oppList.length < max_items && oppList.length < myfetch.x_pw_total) {
+      let data = JSON.parse(myfetch.response);
+      oppList.push(...new Opportunity(data));
+      myfetch.next();
+    }
+    return new CopperResponder(oppList, myfetch);
+  }
+
+  // List Pipelines w/Stage Info
+  listPipelines() {
+    if(!isEmptyArray(this.pipelines)) return new CopperResponder(this.pipelines, null);
+    let myfetch = new CopperFetcher('get','/pipelines').exec();
+    let response = JSON.parse(myfetch.response);
+    this.pipelines.push(...response);
+    return new CopperResponder((myfetch.getResponseCode() == 200) ? this.pipelines : null, myfetch);
+  }
+
+
+    //
+  // API: Projects
+    //
+
+    //
+  // API: Tasks
+    //
+
+    //
+  // API: Activities
+    //
+
+  assignment(type = isRequired()) {
+  }
+  
+  // List Activities
+    // params: Parent = {id: entity_id, type: entity_type}
+    // returns: Responder(Array of Activities, fetcher used)
+    // Function returns all activities associated with this entity
+  listActivities(parent = {id: null, type: null}) {
+    if ((isEmptyObject(parent) || (parent.id == undefined) || parent.id == null)) return [];
+    let aSearch = new CopperSearch({page_size: 200, sort_by: "activity_date", sort_direction: "asc", parent: parent})
+    let myfetch = new CopperFetcher('post','/activities/search',aSearch.get()).exec();
+    return new CopperResponder((myfetch.getResponseCode() == 200) ? new Activity(JSON.parse(myfetch.response)) : null, myfetch)
+  }
+
+  // List Activity Types
+    // params: none
+    // returns: Responder(Array of simple {id : value} objects, fetcher used)
+    // Function combines the 'user' & 'system' arrays into a single array
+  listActivityTypes() {
+    if(!isEmptyArray(this.activity_types)) return new CopperResponder(this.activity_types, null);
+    let myfetch = new CopperFetcher('get','/activity_types').exec();
+    let response = JSON.parse(myfetch.response);
+    this.activity_types.push(...response["user"]);
+    this.activity_types.push(...response["system"]);
+    return new CopperResponder((myfetch.getResponseCode() == 200) ? this.activity_types : null, myfetch);
+  }
+    
+
+    //
+  // API: Custom Fields
+    //
+
+  listCustomFieldDefinitions() {
+    if(!isEmptyArray(this.customFieldDefinitions)) return new CopperResponder(this.customFieldDefinitions, null);
+    let myfetch = new CopperFetcher('get','/custom_field_definitions').exec();
+    let response = JSON.parse(myfetch.response);
+    this.customFieldDefinitions.push(...response);
+    return new CopperResponder((myfetch.getResponseCode() == 200) ? this.customFieldDefinitions: null, myfetch);
+  }
+
+  fetchCustomFieldDefinition(obj = isRequired()) {
+    if (isNaN(parseInt(obj)))  {
+      return $.listCustomFieldDefinitions().getResponse().find((elem) => {return elem["name"] == obj});      
+    }
+    return $.listCustomFieldDefinitions().getResponse().find((elem) => {return elem["id"] == parseInt(obj)})      
+  }
+
+
+    //
+  // API: Related Items
+    //
+
+  fetchRelatedOpportunities(id = isRequired()) {
+    let myfetch = new CopperFetcher('get','/people/' + id + '/related/opportunities').exec();
+    let response = JSON.parse(myfetch.response);
+    return new CopperResponder((myfetch.getResponseCode() == 200 ? response : null), myfetch);
+  }
+
+    //
+  // API: File Upload
+    //
+
+    //
+  // API: Webhooks
+    //
+
+
+
+} // end of Copper definition
+
+const $ = new Copper();
+
+/**
+ * @class CopperFetcher
+ * - Performs the actual Copper API call.  The fetcher is used
+ * to maintain key information about the call.
+ * 
+ * @params {method} - the API method to call
+ * @params {url} - the specific Url to append to the base Url
+ * @params {body} - depending on method, the JSON body
+ * @returns {Object} - CopperFetcher object
+ */
+class CopperFetcher {
+  constructor(method = isRequired(), url = isRequired(), body = null) {
+    this.base_url = $.api_url;
+    this.base_header = $.getAPIHeader_();
+    this.fetchUrl = this.base_url + url;
+    this.page_size = $.def_page_size;
+    this.page_number = 1;
+    this.page_count = 1;
+    this.body = body;
+    this.params = {
+        "method"	: method,
+        "headers": this.base_header,
+        "muteHttpExceptions"	: true
+        };
+    if(body != null && body.hasOwnProperty("page_size"))  {
+      this.page_size = body["page_size"] || this.page_size;
+      this.page_number = body["page_number"] || this.page_number;
+      this.params["payload"] = JSON.stringify(body);
+    }
+    this.response = {};
+    this.status = 0;
+    this.x_pw_total = 0;
+    this.inspector_gadget = this.gadget();
+  }
+
+  gadget()  {
+
+  }
+
+/**
+ * @method CopperFetcher.exec
+ * - executes the built CopperFetcher, actually does the API call
+ * - updates the fetcher page info
+ * @returns {Object} - CopperFetcher
+ */
+  exec()  {
+    if (this.params.method != "") {
+      try {
+        this.response = UrlFetchApp.fetch(this.fetchUrl,this.params);
+        this.status = this.response.getResponseCode();
+        this.x_pw_total = parseInt(this.response.getAllHeaders()["x-pw-total"]) || (this.status == 200 ? 1 : 0);
+        this.page_count = (this.x_pw_total != 0 && this.page_size != 0) ? Math.ceil(this.x_pw_total / this.page_size) : 1 ;
+        this.prev_page = (this.page_number > 1) ? this.page_number - 1 : false;
+        this.next_page = (this.page_number < this.page_count) ? this.page_number + 1: false;
+        this.first_page = 1;
+        this.last_page = this.page_count;
+      }
+      catch(err)  {
+        throw new Error(err);
+      }
+    };
+    return this;
+  }
+
+/**
+ * @method CopperFetcher.next
+ * - updates the JSON body to fetch the next page
+ * 
+ * @returns {Object} - CopperFetcher
+ */
+  next()  {
+    if (this.next_page) {
+      this.body["page_number"] = this.next_page;
+      this.params["payload"] = JSON.stringify(this.body);
+      this.page_number = this.next_page;
+      return this.exec();
+    } else {
+      this.status = 404;
+    }
+    return this;
+  }
+
+/**
+ * @method CopperFetcher.prev
+ * - updates the JSON body to fetch the previous page
+ * 
+ * @returns {Object} - CopperFetcher
+ */
+  prev()  {
+    if (this.prev_page) {
+      this.body["page_number"] = this.prev_page;
+      this.params["payload"] = JSON.stringify(this.body);
+      this.page_number = this.prev_page;
+      return this.exec();
+    } else {
+      this.status = 404;
+    }
+  }
+
+/**
+ * @method CopperFetcher.first
+ * - updates the JSON body to fetch the first page
+ * 
+ * @returns {Object} - CopperFetcher
+ */
+  first()  {
+    if (this.first_page) {
+      this.body["page_number"] = this.first_page;
+      this.params["payload"] = JSON.stringify(this.body);
+      this.page_number = this.first_page;
+    } else {
+      this.status = 404;
+    }
+    return this;
+  }
+
+/**
+ * @method CopperFetcher.next
+ * - updates the JSON body to fetch the last page
+ * 
+ * @returns {Object} - CopperFetcher
+ */
+  last()  {
+    if (this.last_page) {
+      this.body["page_number"] = this.last_page;
+      this.params["payload"] = JSON.stringify(this.body);
+      this.page_number = this.last_page;
+      return this.exec();
+    } else {
+      this.status = 404;
+    }
+    return this;
+  }
+
+/**
+ * @method CopperFetcher.setPageCount
+ * - updates the JSON body with a new page count
+ * 
+ * @returns {Object} - CopperFetcher
+ */
+  setPageCount()  {
+    this.page_count = (this.x_pw_total != 0 && this.page_size != 0) ? Math.ceil(this.x_pw_total / this.page_size) : 1 ;
+    return this;
+  }
+
+  getPageCount()  {
+    return this.page_count;
+  }
+
+  getRecordCount()  {
+    return this.x_pw_total;
+  }
+
+  getResponseCode() {
+    return this.response.getResponseCode();
+  }
+
+  getAllHeaders()  {
+    return this.response.getAllHeaders();
+  }
+
+  setPayload(aPayload = isRequired()) {
+    this.params["payload"] = JSON.stringify(aPayload);
+    return this;
+  }
+
+  getPayload()  {
+    return JSON.parse(this.params["payload"]);
+  }
+
+  setUrl(aUrl = isRequired()) {
+    if (isUrl(this.base_url + aUrl)) this.fetchUrl = aUrl;
+    return this;
+  }
+
+  setMethod(amethod = isRequired()) {
+    if(["get","delete","patch","post","put"].includes(amethod.toLowerCase())) {
+      this.params.method = amethod;
+    }
+    return this;
+  }
+}
+
+/*  Define Copper Responder
+// Ex: return userList
+// Becomes: return new CopperResponder(userList,CopperFetcher instance)
+// use the CopperFetcher for "next", "last", "first", "prev"
+*/ 
+class CopperResponder {
+  constructor(aResponse = null, aFetcher = null)  {
+    this.response = aResponse;
+    this.fetcher = aFetcher;
+    if (this.response != null)  {
+      this.length = (aResponse.hasOwnProperty('length')) ? aResponse.length : null;
+    }
+  }
+  getResponse() {
+    return this.response;
+  }
+  getFetcher()  {
+    return this.fetcher;
+  }
+}
+
+/* Define Copper Search
+// All JSON items typically in the request body related to a search should go in here
+*/
+class CopperSearch  {
+  constructor(criteria = {})  {
+    this.criteria = criteria;
+  }
+
+  set(criteria = {})  {
+    this.criteria = criteria;
+    return this;
+  }
+
+  update(criteria = new Object()) {
+    for (var elem in criteria)  {
+      this.criteria[elem] = criteria[elem];
+    }
+    return this;
+  }
+
+  get() {
+    return this.criteria;
+  }
+
+  pageSize(val) {
+    if (val == undefined) return (this.criteria["page_size"] || 0);
+    this.criteria["page_size"] = parseInt(val);
+    return parseInt(val);
+  }
+}
+
+/* Copper Classes */
+/* 
+  Copper Entity Classes
+  Some of these have no real behavior to them but they are here
+  in case we decide to add something.
+*/
+
+  //
+// Copper Activity Class
+  //
+class Activity {
+  constructor(obj = {}) {
+    if (obj instanceof Activity) return obj;
+    $.initClass_(this, {"id":null,"parent":{"id":null,"type":null},"type":{"id":null,"category":null,"name":null},"user_id":null,"details":null,"activity_date":null,"old_value":null,"new_value":null,"date_created":null,"date_modified":null});
+    if (typeof obj == "number") {
+      var pwObj = $.fetchActivityByID(obj);
+      for (var idx in pwObj) {
+        this[idx] = pwObj[idx];
+      }
+    } else if (isArray(obj)) { // Look for Array of objects 
+      return obj.map((elem) => {return new Activity(elem)});
+    } else {
+      for (var x in obj) {
+        this[x] = obj[x];
+      }
+    }
+  }
+  user()  {
+    return this.user_id;
+  }
+
+  isAssignment()  {
+    return (this.type.id == 2 && this.type.category == "system");
+  }
+
+  getType()  {
+    return new Activity_Type($.listActivityTypes().getResponse().find((elem) => {return elem["id"] == this["type"]["id"];}));
+  }
+
+  dateCreated() {
+    return new Date(this.date_created);
+  }
+
+  dateOf()  {
+    return new Date(this.activity_date);
+  }
+
+  isValue() {
+    return this.new_value;
+  }
+
+  wasValue() {
+    return this.old_value;
+  }
+}
+
+// Array of Activity objects
+class ActivityLog extends Array {
+  constructor(activities = [new Activity()]) {
+    super();
+    if (isArray(activities)) this.push(...new Activity(activities));
+    }
+  last()  {
+    return {"activity": this[this.length-1], "hasNext": false};
+  }
+  first() {
+    return {"activity": this[0], "hasNext": true};
+  }
+  next(obj) {
+    return {"activity": this[obj.value++], "hasNext": (obj.value > this.length)};
+  }
+  prev(obj) {
+    return {"activity": this[obj.value--], "hasNext": true};
+  }
+
+}
+
+  //
+// Copper Activity Type Class
+  //
+class Activity_Type {
+  constructor(obj = {}) {
+    this.id = obj["id"] || null;
+    this.category = obj["category"] || null;
+    this.name = obj["name"] || null;
+    this.is_disabled = true;
+    this.count_as_interaction = false;
+  }
+}
+
+  //
+// Copper Custom Activity Type Class
+  //
+class CustomActivityType {
+  constructor(obj = {}) {
+    this.id = obj["id"] || null;
+    this.company_id = obj["company_id"] || null;
+    this.icon_type = obj["icon_type"] || null;
+    this.is_disabled = obj["is_disabled"] || null;
+    this.is_interaction = obj["is_interaction"] || null;
+    this.name = obj["name"] || null;
+    this.is_default_task_type = obj["is_default_task_type"] || null;
+  }
+}
+
+  //
+// Copper Parent Class
+  //
+class Parent {
+  constructor(obj = {}) {
+    this.id = obj["id"];
+    this.type = obj["type"];
+  }
+}
+
+  //
+// Copper User Class
+  //
+class User {
+  constructor(obj = null) {
+    $.initClass_(this, {"id": null, "name": null, "email": null, "groups": []});
+    if (typeof obj == "number" || typeof obj == "string") {  // Look for User ID
+      var pwObj = $.fetchUserByID(obj);
+      for (var idx in pwObj) {
+        this[idx] = pwObj[idx];
+      }
+      if(expand) Logger.log("User - this['custom_fields] = $.expandCFD('custom_fields[]')"); // To be implemented
+    } else if (isArray(obj)) { // Look for Array of objects 
+      return obj.map((elem) => {return new User(elem)});
+    } else { // assume object is structured like a User
+      for (var x in obj) {
+        this[x] = obj[x];
+      }
+    }
+  }
+}
+
+  //
+// Copper Lead Class
+  //
+class Lead {
+  constructor(obj = {}) {
+    $.initClass_(this, {"id":null,"name":null,"prefix":null,"first_name":null,"last_name":null,"middle_name":null,"suffix":null,"address":{"street":null,"city":null,"state":null,"postal_code":null,"country":null},"assignee_id":null,"company_name":null,"customer_source_id":null,"details":null,"email":{"email":null,"category":null},"interaction_count":null,"monetary_unit":null,"monetary_value":null,"converted_unit":null,"converted_value":null,"socials":[],"status":null,"status_id":null,"tags":[],"title":null,"websites":[],"phone_numbers":[],"custom_fields":[],"date_created":null,"date_modified":null,"date_last_contacted":null,"converted_opportunity_id":null,"converted_contact_id":null,"converted_at":null});
+    if (typeof obj == "number" || typeof obj == "string") { // Look for Lead ID
+      var pwObj = $.fetchLeadByID(obj);
+      for (let idx in pwObj) {
+        this[idx] = pwObj[idx];
+      }
+      if(expand) Logger.log("Lead - this['custom_fields] = $.expandCFD('custom_fields[]')"); // To be implemented
+    } else if (isArray(obj)) {  // Look for Array of objects
+      return obj.map((elem) => {return new Lead(elem)});
+    }
+      else {  // assume object is structures like a Lead
+      for (let x in obj) {
+        this[x] = obj[x];
+      }
+    }
+  }
+
+  // Return date lead created
+  createDate()  {
+    return new Date(etod(this.date_created));
+  }
+
+  // Return date lead created
+  modifiedDate()  {
+    return new Date(etod(this.date_modified));
+  }
+
+  // Return date lead last contacted
+  lastContactDate() {
+    return new Date(etod(this.date_last_contacted));
+  }
+
+  // Return current tags
+  getTags() {
+    return this.tags;
+  }
+
+  // Set the in memory tags
+  setTags(theTags) {
+    if(isArray(theTags)) this.tags = theTags;
+    return this;
+  }
+
+  addTag(aTag)  {
+    if(!this.tags.includes(aTag)) {
+      this.tags.push(aTag);
+    }
+    return this;
+  }
+
+  removeTag(aTag) {
+    if (this.tags.includes(aTag)) {
+      this.tags.splice(indexOf(aTag),1);
+    }
+  }
+
+  // Return unique Copper ID
+  getId() {
+    return this.id;
+  }
+
+  // Return email address
+  getEmail(aType) {
+    if(typeof aType == 'undefined') return this.email["email"];
+  }
+
+  getName() {
+    return this["name"];
+  }
+
+  getType() {
+    let typeId = this["custom_fields"].find((cfd) => {return (cfd.custom_field_definition_id == 37316 ? cfd.value : false)});
+  }
+
+  // Add resolved element to all custom fields
+  resolveCustomFields() {
+    for (let idx in this["custom_fields"]) {
+      this["custom_fields"][idx] = new CustomField(this["custom_fields"][idx]).resolve();
+    }
+    return this;
+  }
+
+
+}
+
+  //
+// Copper Contact Type Class
+  //
+class ContactType {
+  constructor(obj = {}) {
+    this["id"] = obj["id"] || null;
+    this["name"] = obj["name"] || null;
+  }
+}
+
+  //
+// Copper Person Class
+  //
+class Person {
+  constructor(obj = {}, expand=false) {
+    $.initClass_(this, {"id":null,"name":null,"prefix":null,"first_name":null,"middle_name":null,"last_name":null,"suffix":null,"address":{"street":null,"city":null,"state":null,"postal_code":null,"country":null},"assignee_id":null,"company_id":null,"company_name":null,"contact_type_id":null,"details":null,"emails":[],"phone_numbers":[],"socials":[],"tags":[],"title":null,"websites":[],"custom_fields":[],"date_created":null,"date_modified":null,"date_last_contacted":null,"interaction_count":null,"leads_converted_from":[],"date_lead_created":null});
+    if (typeof obj == "number" || typeof obj == "string") {
+      var pwObj = $.fetchPersonByID(obj).getResponse();
+      for (var idx in pwObj) {
+        this[idx] = pwObj[idx];
+      }
+      if(expand) Logger.log("Person - this['custom_fields] = $.expandCFD('custom_fields[]')"); // To be implemented
+    } else if (isArray(obj)) { // Look for Array of objects 
+      return obj.map((elem) => {return new Person(elem)});
+    } else {
+      for (var x in obj) {
+        this[x] = obj[x];
+      }
+    }
+  }
+  // Return Copper unique ID
+  getId() {
+    return this.id;
+  }
+
+  // Return current tags
+  getTags() {
+    return this.tags;
+  }
+
+  // Set the in memory tags
+  setTags(theTags) {
+    if(isArray(theTags)) this.tags = theTags;
+    return this;
+  }
+
+  addTag(aTag)  {
+    if(!this.tags.includes(aTag)) {
+      this.tags.push(aTag);
+    }
+    return this;
+  }
+
+  removeTag(aTag) {
+    if (this.tags.includes(aTag)) {
+      this.tags.splice(indexOf(aTag),1);
+    }
+  }
+
+  getRelatedOpportunities() {
+    let opps = $.fetchRelatedOpportunities(this.id).getResponse();
+    let items = [];
+    for (let opp of opps) {
+      items.push(new Opportunity(opp["id"]));
+    }
+    return items;
+  }
+
+}
+
+  //
+// Copper Company Class
+  //
+class Company {
+  constructor(obj = {}) {
+    $.initClass_(this, {"id":null,"name":null,"address":{"street":null,"city":null,"state":null,"postal_code":null,"country":""},"assignee_id":null,"contact_type_id":null,"details":null,"email_domain":null,"phone_numbers":[],"socials":[],"tags":[],"websites":[],"custom_fields":[],"interaction_count":null,"date_created":null,"date_modified":null});
+    if (typeof obj == "number" || typeof obj == "string") {
+      var pwObj = $.fetchCompanyByID(obj);
+      for (var idx in pwObj) {
+        this[idx] = pwObj[idx];
+      }
+      if(expand) Logger.log("Company - this['custom_fields] = $.expandCFD('custom_fields[]')"); // To be implemented
+    } else if (isArray(obj)) { // Look for Array of objects 
+      return obj.map((elem) => {return new Company(elem)});
+    } else {
+      for (var x in obj) {
+        this[x] = obj[x];
+      }
+    }
+  }
+}
+
+  //
+// Copper Opportunity Class
+  //
+class Opportunity {
+  constructor(obj = {}, expand = false) {
+    $.initClass_(this, {"id":null,"name":null,"assignee_id":null,"close_date":null,"company_id":null,"company_name":null,"customer_source_id":null,"details":null,"loss_reason_id":null,"pipeline_id":null,"pipeline_stage_id":null,"primary_contact_id":null,"priority":null,"status":null,"tags":[],"interaction_count":null,"monetary_unit":null,"monetary_value":null,"converted_unit":null,"converted_value":null,"win_probability":null,"date_stage_changed":null,"date_last_contacted":null,"leads_converted_from":[],"date_lead_created":null,"date_created":null,"date_modified":null,"custom_fields":[]});
+    if (typeof obj == "number" || typeof obj == "string") {
+      var pwObj = $.fetchOpportunityByID(obj).getResponse();
+      for (var idx in pwObj) {
+        this[idx] = pwObj[idx];
+      }
+      if(expand) Logger.log("Opportunity - this['custom_fields] = $.expandCFD('custom_fields[]')"); // To be implemented
+    } else if (isArray(obj)) { // Look for Array of objects 
+      return obj.map((elem) => {return new Opportunity(elem)});
+    } else {
+      for (var x in obj) {
+        this[x] = obj[x];
+      }
+    }
+  }
+
+  getId() {
+    return this.id;
+  }
+  
+  getAssignee() {
+    return this.assignee_id;
+  }
+
+  getStatus()  {
+    return this.status;
+  }
+  isValid()  {
+    return (this.id == null ? false : true);
+  }
+
+  getClient() {
+    return (this.primary_contact_id == null) ? null : new Person(this.primary_contact_id);
+  }
+
+  getCustomField(obj = isRequired())  {
+    let defId = new CustomFieldDefinition($.fetchCustomFieldDefinition(obj));
+    let myCFD = new CustomField(this.custom_fields.find((elem) => {return elem["custom_field_definition_id"] == defId["id"]}));
+    return ((myCFD != null) ? defId.findOptionByID(myCFD["value"]) : null);
+  }
+
+  getPipelineInfo() {
+    let pipelineInfo = $.listPipelines().getResponse();
+    let px = pipelineInfo.findIndex((elem) => {return elem["id"] == this.pipeline_id});
+    if (px == -1) return {name: null, stage: null};
+    let stage = pipelineInfo[px]["stages"].find((elem) => {return elem["id"] == this.pipeline_stage_id});
+    return {name: pipelineInfo[px]["name"], stage: stage["name"]};
+  }
+
+}
+  //
+// Copper Custom Field Class
+  //
+class CustomField {
+  constructor(obj = {})  {
+    $.initClass_(this, {"custom_field_definition_id": null, "value": null});
+    for (var x in obj)  {
+      this[x] = obj[x];
+    }
+  }
+
+  // Resolve the actual name of the CustomField
+  // Resolve the actual value of the CustomField
+  // Insert resolved element into this custom field
+  // Ex: {"custom_field_definition_id": 37316, "value": 41594 }
+  // Becomes: {"custom_field_definition_id": 37316, "value": 41594, "resolved": {"name": "Type of Lead", "value": "Buying"}}
+  resolve() {
+    let cfd = new CustomFieldDefinition(this["custom_field_definition_id"]);
+    this["resolved"] = {"name": cfd["name"],"value": (cfd["value"] || this["value"])};
+    if (cfd.hasOwnProperty('options') && cfd.options.length > 0 && this["value"] != null) {
+        this.resolved.value = cfd["options"].find((item) => {return item["id"] == this["value"]})["name"];
+      }
+    return this;
+  }
+
+  getResolved() {
+    return this["resolved"]; 
+  }
+}
+
+  //
+// Copper Custom Field Definition Class
+  //
+class CustomFieldDefinition {
+  constructor(obj = {}) {
+    $.initClass_(this, {
+      "id": null,
+      "name": null,
+      "value": null,
+      "data_type": null,
+      "available_on": [],
+      "options": []
+    });
+    if (typeof obj == "number" || typeof obj == "string") {
+      var pwObj = $.fetchCustomFieldDefinition(obj);
+      for (var idx in pwObj) {
+        this[idx] = pwObj[idx];
+      }
+    } else {
+      for (var x in obj) {
+        this[x] = obj[x];
+      }
+    }
+  }
+  getName() {
+    return this.name;
+  }
+
+  getId() {
+    return this.id;
+  }
+ 
+  getValue()  {
+    return this.value;
+  }
+
+  getOptions()  {
+    return this.options;
+  }
+
+  findOptionByID(cfdId = isRequired())  {
+    return this.options.find((elem) => {return elem["id"] == cfdId});
+  }
+
+  findOptionByName(cfdName = isRequired())  {
+    return this.options.find((elem) => {return elem["name"] == cfdName});
+  }
+}
+/**
+ * Direct call functions available from Google Sheets
+   Under development
+ */
