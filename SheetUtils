@@ -411,7 +411,7 @@ function jsDate2Sheets(serialNum = isRequired())  {
 
 // Shows an alert and then throw the final error if fatal
 function die(msg, err)  {
-  msg = msg || "HAL detected an unrecoverable fault and died!";
+  msg = msg || "Detected an unrecoverable fault and died!";
   SpreadsheetApp.getUi().alert(msg);
   if (err || msg.includes("died")) {
     console.log(msg + "\n" + err);
