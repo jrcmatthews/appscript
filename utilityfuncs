@@ -1,0 +1,31 @@
+// Utilities v1.12
+// Handy Global const - Lazy, I know!
+// Example: const hello = (name = isRequired()) => {Logger.log('hello ${name}')};
+const ONE_SECOND = 1000;
+const ONE_MINUTE = ONE_SECOND * 60;
+const MAX_EXECUTION_TIME = ONE_MINUTE * 6;
+const isRequired = () => {throw new Error("I'm sorry, HAL, I need parameters to do that.");}
+const isString = (obj) => {return (typeof obj == "string")}
+const isNumber = (obj) => {return (typeof obj == "number")}
+const exists = (obj) => {return (obj !== undefined)}
+const noParams = () => {throw new Error("I'm sorry, HAL, I don't use parameters");};
+const isEmptyObject = (obj) => {return (obj && Object.keys(obj).length === 0 && obj.constructor === Object);}
+const isArray = (value) => {return (value instanceof Array)};
+const isSet = (value) => {return (value instanceof Set)};
+const isEmptySet = (value) => {return (isSet(value) && obj.size == 0)};
+const isEmptyArray = (value) => {return (isArray(value) && value.length == 0)};
+const etos = (num) => {return (num/86400)+25569};
+const dtoe = (date) => {return (date.getTime() / ONE_SECOND)};
+const etod = (date) => {return (date * ONE_SECOND)};
+const jsSleep = (milliseconds) => {return new Promise(resolve => setTimeout(resolve, milliseconds));}
+const sleep = (seconds) => {return Utilities.sleep(seconds * ONE_SECOND);}
+const toKeyname = (s) => {return s.toLowerCase().replace(/\W/gm,"_")};
+const url2Id = (s) => {return (isUrl(s) ? RegExp(/[0-9]+$/,"").exec(s)[0] : parseInt(s))}
+const isEmail = (email) => {return (new RegExp(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i).test(email));}
+const isPhone = (strPhone) => { return (new RegExp(/\s*\S*\+?[1]?\ *\(?([0-9]{3})\)?[\ -.]?([0-9]{3})[\ -.]?([0-9]{4})\s*\S*/).test(strPhone));}
+const isUrl = (strUrl) => {return (new RegExp(/\b((https?):\/\/)(www.)?([a-zA-Z0-9@:%_\\+~#?&//=]{2,256})\.[a-z]{2,6}\/?([-a-zA-Z0-9@:%._\\+~#?&//=]*)/).test(strUrl));}
+const pwLink = (type, id) => {return `https://app.copper.com/companies/24721/app?p=db#/${type}/${id}`};
+const pwHyper = (type, id) => {return `=hyperlink("https://app.copper.com/companies/24721/app?p=db#/${type}/${id}","${id}")`};
+const dbLink = (type, id) => {return `http://houwzer.com/app/dashboard/${type}/${id}`};
+const dbHyper = (type, id) => {return `=hyperlink("http://houwzer.com/app/dashboard/${type}/${id}","${id}")`};
+const jdate2Sheet = (serialNum) => {return '=dateValue("' + Utilities.formatDate(serialNum,"America/New_York","MM/dd/yyyy") + '")+timeValue("' + Utilities.formatDate(serialNum,"America/New_York","hh:mm:ss a") + '")'};
